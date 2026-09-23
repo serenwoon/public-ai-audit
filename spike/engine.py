@@ -1,18 +1,25 @@
-"""감리 엔진 — 스텁(0.1). 순수 함수, 네트워크 없음.
+"""감리 엔진 — 규칙(0.2). 순수 함수, 네트워크 없음.
 
-지금은 「주장 분해 + 유형 분류 + 되물을 질문 틀」만 한다. 원문 대조가 없으므로 등급은 전부 「확인 불가」다.
-진짜 엔진(원문 캐시·LLM·자기감리)이 들어오면 audit()의 계약(반환 JSON 모양)은 유지하고 속만 바꾼다.
+「주장 분해 + 유형 분류 + 규칙 판정 + 되물을 질문」을 한다. 지금 규칙은 시간 규칙 하나다.
+규칙이 판정하지 않은 주장은 원문 대조 전이므로 「확인 불가」로 남는다.
+원문 대조 규칙(복지서비스 API)이 들어와도 audit()의 계약(반환 JSON 모양)은 유지하고 RULES에 더한다.
 계약은 볼트 30_projects/공공AI_감리/10_기획/01_감리_판정규칙_초안 을 따른다.
 """
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-ENGINE = "stub-0.1"
+import time_rule
+
+ENGINE = "rules-0.2"
 KST = timezone(timedelta(hours=9), "KST")  # 확인일은 한국 시간 — 서버(Vercel)는 UTC다
 GRADES = ("확인됨", "틀림", "말하지 않은 조건", "확인 불가")
 GRADE_MARK = {"확인됨": "✅", "틀림": "❌", "말하지 않은 조건": "⚠️", "확인 불가": "❓"}
+GRADE_RANK = {"틀림": 3, "말하지 않은 조건": 2, "확인됨": 1, "확인 불가": 0}  # 판정이 여럿이면 센 것
+
+# 규칙 계약: rule(문장, 오늘) → {"grade","reason","expr","question"} 또는 None. 동점이면 앞선 규칙
+RULES = (("time", time_rule.judge),)
 
 # 우선순위 순서 — 앞에 있는 유형이 먼저 잡는다
 _TYPE_RULES = [
@@ -51,25 +58,40 @@ def classify(sentence: str) -> str:
     return "기타"
 
 
-def audit(text: str, situation: str = "") -> dict:
-    """스텁 감리. 등급은 전부 「확인 불가」, 이유는 원문 미확보."""
-    sentences = split_claims(text)
-    claims = []
-    for i, s in enumerate(sentences, 1):
-        claims.append({
+def audit(text: str, situation: str = "", today: date | None = None) -> dict:
+    """규칙 감리. 규칙이 판정하지 않은 주장은 「확인 불가」(원문 미확보)로 남는다."""
+    today = today or datetime.now(KST).date()
+    claims: list[dict] = []
+    rule_questions: list[str] = []
+    covered: set[str] = set()
+    for i, s in enumerate(split_claims(text), 1):
+        claim = {
             "id": i,
             "type": classify(s),
             "text": s,
             "grade": "확인 불가",
             "mark": GRADE_MARK["확인 불가"],
-            "reason": "원문 미확보 — 엔진 전(스텁). 대조할 공고·법령을 아직 받지 않았다",
+            "reason": "원문 미확보 — 대조할 공고·법령을 아직 받지 않았다",
             "source": None,
-        })
+            "rule": None,
+            "expr": None,
+        }
+        best = strongest([{**v, "rule": name} for name, rule in RULES if (v := rule(s, today))])
+        if best:
+            claim.update(grade=best["grade"], mark=GRADE_MARK[best["grade"]], reason=best["reason"],
+                         rule=best["rule"], expr=best.get("expr"))
+            q = best.get("question")
+            if q and q not in rule_questions:
+                rule_questions.append(q)
+                covered.add(claim["type"])
+        claims.append(claim)
 
-    # 되물을 질문 — 돈·기한을 잃을 수 있는 유형부터, 유형당 하나, 최대 셋
-    questions: list[str] = []
+    # 되물을 질문 — 규칙이 만든 구체 질문이 먼저, 그다음 유형별 기본 질문(이미 다룬 유형은 건너뛴다). 최대 셋
+    questions = rule_questions[:3]
     for t in ("마감", "자격", "금액", "절차", "기관", "기타"):
-        if any(c["type"] == t for c in claims) and len(questions) < 3:
+        if len(questions) >= 3:
+            break
+        if t not in covered and any(c["type"] == t for c in claims):
             questions.append(_QUESTION_TEMPLATES[t].format(situation=situation or "위에 적은 상황"))
 
     summary = {g: sum(1 for c in claims if c["grade"] == g) for g in GRADES}
@@ -83,6 +105,12 @@ def audit(text: str, situation: str = "") -> dict:
         "action": action,
         "summary": summary,
     }
+
+
+def strongest(verdicts: list) -> dict | None:
+    """판정 여럿 중 가장 센 것(❌ > ⚠️ > ✅ > ❓). 동점이면 앞선 것."""
+    vs = [v for v in verdicts if v]
+    return max(vs, key=lambda v: GRADE_RANK[v["grade"]]) if vs else None
 
 
 def summary_line(result: dict) -> str:

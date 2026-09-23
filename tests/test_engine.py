@@ -3,10 +3,13 @@ import json
 import socket
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spike"))
 import engine  # noqa: E402
+
+TODAY = date(2026, 9, 23)
 
 SAMPLE = ("서울에 거주하는 만 19~34세 미취업 청년이면 청년수당을 신청하실 수 있습니다. "
           "월 50만원을 최대 6개월 지원합니다.\n이번 달 말까지 청년몽땅정보통에서 온라인으로 신청하시면 됩니다. "
@@ -41,14 +44,15 @@ class TestSplitAndClassify(_NoNetwork):
 
 class TestAuditContract(_NoNetwork):
     def test_shape(self):
-        r = engine.audit(SAMPLE, situation="서울 27세 미취업")
+        r = engine.audit(SAMPLE, situation="서울 27세 미취업", today=TODAY)
         self.assertEqual(r["engine"], engine.ENGINE)
         self.assertEqual(len(r["claims"]), 4)
         for c in r["claims"]:
             self.assertIn(c["grade"], engine.GRADES)
-            self.assertEqual(c["grade"], "확인 불가")  # 스텁은 전부 확인 불가
-            self.assertEqual(c["mark"], "❓")
             self.assertIn(c["type"], ("자격", "마감", "금액", "절차", "기관", "기타"))
+        grades = {c["type"]: c["grade"] for c in r["claims"]}
+        self.assertEqual(grades["마감"], "말하지 않은 조건")  # 「이번 달 말까지」 — 기준 시점 없음
+        self.assertEqual(grades["자격"], "확인 불가")        # 원문 대조 전
         self.assertLessEqual(len(r["questions"]), 3)
         self.assertGreaterEqual(len(r["questions"]), 1)
         self.assertIn("서울 27세 미취업", " ".join(r["questions"]))  # 상황이 질문에 들어간다
@@ -73,6 +77,37 @@ class TestAuditContract(_NoNetwork):
     def test_summary_line(self):
         r = engine.audit(SAMPLE)
         self.assertTrue(engine.summary_line(r).startswith("주장 4개"))
+
+
+class TestRulesFramework(_NoNetwork):
+    def test_wrong_beats_warning_and_confirmed(self):
+        vs = [{"grade": "말하지 않은 조건"}, {"grade": "틀림"}, {"grade": "확인됨"}]
+        self.assertEqual(engine.strongest(vs)["grade"], "틀림")
+
+    def test_warning_beats_confirmed_and_unknown(self):
+        vs = [{"grade": "확인 불가"}, {"grade": "확인됨"}, {"grade": "말하지 않은 조건"}]
+        self.assertEqual(engine.strongest(vs)["grade"], "말하지 않은 조건")
+
+    def test_no_verdicts_means_none(self):
+        self.assertIsNone(engine.strongest([]))
+
+
+class TestTimeRuleInEngine(_NoNetwork):
+    def test_relative_deadline_becomes_warning(self):
+        r = engine.audit("이번 달 말까지 온라인으로 신청하세요.", today=TODAY)
+        c = r["claims"][0]
+        self.assertEqual((c["grade"], c["mark"], c["rule"]), ("말하지 않은 조건", "⚠️", "time"))
+        self.assertEqual(r["summary"]["말하지 않은 조건"], 1)
+
+    def test_time_question_first_and_no_duplicate_deadline_question(self):
+        r = engine.audit("이번 달 말까지 온라인으로 신청하세요. 월 50만원을 6개월 지원합니다.", today=TODAY)
+        self.assertIn("이번 달 말", r["questions"][0])
+        self.assertEqual(len(r["questions"]), 2)  # 시간 질문 1 + 금액 질문 1. 마감 기본 질문이 겹치면 3
+
+    def test_claim_without_time_expression_stays_unknown(self):
+        r = engine.audit("월 50만원을 6개월 지원합니다.", today=TODAY)
+        self.assertEqual(r["claims"][0]["grade"], "확인 불가")
+        self.assertIsNone(r["claims"][0]["rule"])
 
 
 if __name__ == "__main__":

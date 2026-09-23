@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "regions": ["icn1"],
+  "functions": {
+    "api/*.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{logs/**,tests/**,.git/**,**/__pycache__/**,**/*.log}"
+    }
+  },
+  "rewrites": [
+    { "source": "/skill",  "destination": "/api/skill" },
+    { "source": "/audit",  "destination": "/api/audit" },
+    { "source": "/health", "destination": "/api/health" }
+  ]
+}

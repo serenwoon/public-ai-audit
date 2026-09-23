@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>믿어도 돼? — 공공 AI 답변 감리 (스파이크)</title>
+<style>
+  :root { --bg:#fafaf7; --fg:#1b1b1b; --muted:#6b6b6b; --line:#e4e2dc; --card:#fff; --accent:#2b4c7e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141414; --fg:#eeeeea; --muted:#9a9a94; --line:#2c2c2c; --card:#1d1d1d; --accent:#8fb3ff; } }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:24px 16px 64px }
+  h1 { font-size:22px; margin:0 0 4px } .sub { color:var(--muted); margin:0 0 20px; font-size:14px }
+  .stub { background:#fff4d6; color:#5a3d00; border:1px solid #f0d48a; border-radius:8px; padding:8px 12px; font-size:13px; margin-bottom:16px }
+  @media (prefers-color-scheme: dark) { .stub { background:#3a2e10; color:#f5d98a; border-color:#5a4718 } }
+  label { display:block; font-weight:600; margin:14px 0 6px; font-size:14px }
+  textarea, input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg); font:inherit }
+  textarea { min-height:160px; resize:vertical }
+  button { font:inherit; border:0; border-radius:8px; padding:10px 16px; cursor:pointer }
+  .primary { background:var(--accent); color:#fff; margin-top:14px; width:100% }
+  .copy { background:transparent; color:var(--accent); border:1px solid var(--line); padding:4px 10px; font-size:13px; margin-left:8px }
+  #out { margin-top:28px } .summary { font-weight:700; margin-bottom:10px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:8px 0 }
+  .card .head { display:flex; gap:8px; align-items:baseline; font-size:13px; color:var(--muted) }
+  .card .mark { font-size:18px } .card .type { border:1px solid var(--line); border-radius:999px; padding:0 8px }
+  .card .text { margin:6px 0 4px } .card .reason { font-size:13px; color:var(--muted) }
+  h2 { font-size:16px; margin:22px 0 8px }
+  .q { display:flex; align-items:flex-start; justify-content:space-between; gap:8px }
+  .action { border-left:4px solid var(--accent); padding:8px 12px; background:var(--card); border-radius:0 8px 8px 0 }
+  .err { color:#b00020 } .meta { color:var(--muted); font-size:12px; margin-top:18px }
+</style>
+</head>
+<body>
+<main>
+  <h1>믿어도 돼?</h1>
+  <p class="sub">AI가 준 답을 붙여 넣으면 주장 단위로 쪼개 원문과 대조합니다. 판정표가 아니라 <b>되물을 질문</b>과 <b>오늘 할 행동 하나</b>를 돌려드립니다.</p>
+  <div class="stub">🧪 스파이크 — 지금은 스텁 엔진입니다. 원문 대조가 아직 없어 모든 주장이 ❓확인 불가로 나옵니다. 화면·계약·배포 경로를 확인하는 단계입니다.</div>
+
+  <label for="text">AI 답변 붙여넣기</label>
+  <textarea id="text" placeholder="예) 서울에 거주하는 만 19~34세 미취업 청년이면 청년수당을 신청하실 수 있습니다. 월 50만원을 최대 6개월 지원합니다. 이번 달 말까지 온라인으로 신청하시면 됩니다."></textarea>
+  <label for="situation">내 상황 한 줄 (선택)</label>
+  <input id="situation" placeholder="예) 서울 사는 27살, 지금 일 안 함">
+  <button class="primary" id="go">감리하기</button>
+
+  <section id="out" hidden>
+    <div class="summary" id="summary"></div>
+    <div id="cards"></div>
+    <h2>그 AI에게 되물을 질문</h2>
+    <div id="questions"></div>
+    <h2>오늘 할 행동 하나</h2>
+    <div class="action" id="action"></div>
+    <div class="meta" id="meta"></div>
+  </section>
+  <p class="err" id="err" hidden></p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function copy(t, btn){ try{ await navigator.clipboard.writeText(t); btn.textContent='복사됨'; setTimeout(()=>btn.textContent='복사',1200);}catch{ btn.textContent='길게 눌러 복사'; } }
+$('go').onclick = async () => {
+  const text = $('text').value.trim(), situation = $('situation').value.trim();
+  $('err').hidden = true; if(!text){ $('err').textContent='AI 답변을 붙여 넣어 주세요.'; $('err').hidden=false; return; }
+  $('go').disabled = true; $('go').textContent = '감리 중…';
+  try {
+    const r = await fetch('/audit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, situation})});
+    const j = await r.json(); if(!r.ok) throw new Error(j.error || r.status);
+    $('summary').textContent = `주장 ${j.claims.length}개 — ✅${j.summary['확인됨']} ❌${j.summary['틀림']} ⚠️${j.summary['말하지 않은 조건']} ❓${j.summary['확인 불가']}`;
+    $('cards').innerHTML = j.claims.map(c => `<div class="card"><div class="head"><span class="mark">${c.mark}</span><span>${esc(c.grade)}</span><span class="type">${esc(c.type)}</span></div><div class="text">${esc(c.text)}</div><div class="reason">${esc(c.reason)}${c.source ? ' · <a href="'+esc(c.source)+'" target="_blank" rel="noopener">원문</a>' : ''}</div></div>`).join('');
+    $('questions').innerHTML = j.questions.length ? j.questions.map(q => `<div class="card q"><span>${esc(q)}</span><button class="copy">복사</button></div>`).join('') : '<div class="card">되물을 것이 없습니다.</div>';
+    document.querySelectorAll('.q .copy').forEach((b,i) => b.onclick = () => copy(j.questions[i], b));
+    $('action').textContent = j.action;
+    $('meta').textContent = `엔진 ${j.engine} · 확인 ${j.checked_at}`;
+    $('out').hidden = false; $('out').scrollIntoView({behavior:'smooth'});
+  } catch(e){ $('err').textContent = '감리 실패: ' + e.message; $('err').hidden = false; }
+  finally { $('go').disabled = false; $('go').textContent = '감리하기'; }
+};
+</script>
+</body>
+</html>

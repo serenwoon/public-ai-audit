@@ -104,6 +104,10 @@ class TestTimeRuleInEngine(_NoNetwork):
         self.assertIn("이번 달 말", r["questions"][0])
         self.assertEqual(len(r["questions"]), 2)  # 시간 질문 1 + 금액 질문 1. 마감 기본 질문이 겹치면 3
 
+    def test_result_records_the_day_rules_used(self):
+        # 결과 링크가 같은 날 기준으로 다시 계산하려면 규칙이 쓴 날짜를 결과에 남겨야 한다
+        self.assertEqual(engine.audit("이번 달 말까지 신청하세요.", today=TODAY)["basis_date"], "2026-09-23")
+
     def test_claim_without_time_expression_stays_unknown(self):
         r = engine.audit("월 50만원을 6개월 지원합니다.", today=TODAY)
         self.assertEqual(r["claims"][0]["grade"], "확인 불가")

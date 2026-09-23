@@ -20,6 +20,7 @@
   .primary { background:var(--accent); color:#fff; margin-top:14px; width:100% }
   .copy { background:transparent; color:var(--accent); border:1px solid var(--line); padding:4px 10px; font-size:13px; margin-left:8px }
   #out { margin-top:28px } .summary { font-weight:700; margin-bottom:10px }
+  .linknote { border:1px dashed var(--line); border-radius:8px; padding:6px 10px; font-size:13px; color:var(--muted); margin-bottom:10px }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:8px 0 }
   .card .head { display:flex; gap:8px; align-items:baseline; font-size:13px; color:var(--muted) }
   .card .mark { font-size:18px } .card .type { border:1px solid var(--line); border-radius:999px; padding:0 8px }
@@ -27,6 +28,9 @@
   h2 { font-size:16px; margin:22px 0 8px }
   .q { display:flex; align-items:flex-start; justify-content:space-between; gap:8px }
   .action { border-left:4px solid var(--accent); padding:8px 12px; background:var(--card); border-radius:0 8px 8px 0 }
+  .share { margin-top:22px; display:flex; flex-direction:column; gap:8px }
+  .share button { background:transparent; color:var(--accent); border:1px solid var(--accent) }
+  .share .hint { font-size:13px; color:var(--muted) }
   .err { color:#b00020 } .meta { color:var(--muted); font-size:12px; margin-top:18px }
 </style>
 </head>
@@ -43,37 +47,94 @@
   <button class="primary" id="go">감리하기</button>
 
   <section id="out" hidden>
+    <div class="linknote" id="linknote" hidden></div>
     <div class="summary" id="summary"></div>
     <div id="cards"></div>
     <h2>그 AI에게 되물을 질문</h2>
     <div id="questions"></div>
     <h2>오늘 할 행동 하나</h2>
     <div class="action" id="action"></div>
+    <div class="share">
+      <button id="copylink">🔗 이 결과 링크 복사</button>
+      <input id="linkbox" readonly hidden aria-label="결과 링크">
+      <span class="hint" id="linkhint">링크에는 붙여 넣은 답변이 담깁니다. 우리 서버에는 저장되지 않아요.</span>
+    </div>
     <div class="meta" id="meta"></div>
   </section>
   <p class="err" id="err" hidden></p>
 </main>
+<script src="/share.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function copy(t, btn){ try{ await navigator.clipboard.writeText(t); btn.textContent='복사됨'; setTimeout(()=>btn.textContent='복사',1200);}catch{ btn.textContent='길게 눌러 복사'; } }
-$('go').onclick = async () => {
-  const text = $('text').value.trim(), situation = $('situation').value.trim();
-  $('err').hidden = true; if(!text){ $('err').textContent='AI 답변을 붙여 넣어 주세요.'; $('err').hidden=false; return; }
+const WEB_LINK_MAX = 8000; // 웹에서 복사하는 링크는 카톡 대화에 붙여 넣으므로 카카오 버튼(1,800)보다 넉넉하다
+let last = null;           // 마지막으로 감리한 {text, situation, day}
+let lastLink = null;       // 미리 만든 결과 링크. null=준비 중·불가, ''=너무 긺
+// 링크는 결과가 나올 때 미리 만든다. 버튼을 누른 뒤 압축을 기다렸다가 복사하면
+// 아이폰 사파리(카카오톡 인앱 포함)가 사용자 동작이 끝났다며 클립보드 쓰기를 거부한다
+async function prepareLink(){
+  lastLink = null;
+  if (!last || !window.Share || !Share.supported()) return;
+  const link = location.origin + '/#' + await Share.encodeFragment(last);
+  lastLink = link.length > WEB_LINK_MAX ? '' : link;
+}
+
+async function copy(t, btn, label){
+  try { await navigator.clipboard.writeText(t); btn.textContent = '복사됨'; setTimeout(() => btn.textContent = label, 1200); return true; }
+  catch { btn.textContent = '길게 눌러 복사'; return false; }
+}
+function showError(msg){ $('err').textContent = msg; $('err').hidden = false; }
+
+async function runAudit(text, situation, today){
+  $('err').hidden = true;
   $('go').disabled = true; $('go').textContent = '감리 중…';
   try {
-    const r = await fetch('/audit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, situation})});
+    const body = {text, situation}; if (today) body.today = today;
+    const r = await fetch('/audit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const j = await r.json(); if(!r.ok) throw new Error(j.error || r.status);
+    last = {text, situation, day: j.basis_date};
     $('summary').textContent = `주장 ${j.claims.length}개 — ✅${j.summary['확인됨']} ❌${j.summary['틀림']} ⚠️${j.summary['말하지 않은 조건']} ❓${j.summary['확인 불가']}`;
     $('cards').innerHTML = j.claims.map(c => `<div class="card"><div class="head"><span class="mark">${c.mark}</span><span>${esc(c.grade)}</span><span class="type">${esc(c.type)}</span></div><div class="text">${esc(c.text)}</div><div class="reason">${esc(c.reason)}${c.source ? ' · <a href="'+esc(c.source)+'" target="_blank" rel="noopener">원문</a>' : ''}</div></div>`).join('');
     $('questions').innerHTML = j.questions.length ? j.questions.map(q => `<div class="card q"><span>${esc(q)}</span><button class="copy">복사</button></div>`).join('') : '<div class="card">되물을 것이 없습니다.</div>';
-    document.querySelectorAll('.q .copy').forEach((b,i) => b.onclick = () => copy(j.questions[i], b));
+    document.querySelectorAll('.q .copy').forEach((b,i) => b.onclick = () => copy(j.questions[i], b, '복사'));
     $('action').textContent = j.action;
-    $('meta').textContent = `엔진 ${j.engine} · 확인 ${j.checked_at}`;
+    $('meta').textContent = `${j.basis_date} 기준 · 엔진 ${j.engine} · 확인 ${j.checked_at}`;
+    $('linkbox').hidden = true; $('copylink').textContent = '🔗 이 결과 링크 복사';
+    prepareLink();
     $('out').hidden = false; $('out').scrollIntoView({behavior:'smooth'});
-  } catch(e){ $('err').textContent = '감리 실패: ' + e.message; $('err').hidden = false; }
+  } catch(e){ showError('감리 실패: ' + e.message); }
   finally { $('go').disabled = false; $('go').textContent = '감리하기'; }
+}
+
+$('go').onclick = () => {
+  const text = $('text').value.trim(), situation = $('situation').value.trim();
+  if(!text){ showError('AI 답변을 붙여 넣어 주세요.'); return; }
+  $('linknote').hidden = true;
+  runAudit(text, situation, null);
 };
+
+$('copylink').onclick = () => {   // await 없이 바로 복사를 부른다 — 위 prepareLink 주석
+  if (!last) return;
+  if (!window.Share || !Share.supported()) { $('linkhint').textContent = '이 브라우저에서는 링크를 만들 수 없어요.'; return; }
+  if (lastLink === null) { $('linkhint').textContent = '링크를 준비하는 중이에요. 한 번 더 눌러 주세요.'; return; }
+  if (lastLink === '') { $('linkhint').textContent = '답변이 너무 길어 링크로 만들 수 없어요.'; return; }
+  const link = lastLink;
+  copy(link, $('copylink'), '🔗 이 결과 링크 복사').then(ok => {
+    if (!ok) { $('linkbox').value = link; $('linkbox').hidden = false; $('linkbox').select(); }
+  });
+};
+
+// 결과 링크로 열었으면 — 링크에 실린 답변을 링크의 날짜 기준으로 다시 감리한다
+(async () => {
+  if (!/(^#|&)a=/.test(location.hash)) return;
+  if (!window.Share || !Share.supported()) { showError('이 브라우저에서는 링크를 열 수 없어요. 답변을 붙여 넣어 주세요.'); return; }
+  const got = await Share.decodeFragment(location.hash);
+  if (!got) { showError('링크가 손상됐어요. 답변을 붙여 넣어 주세요.'); return; }
+  $('text').value = got.text; $('situation').value = got.situation;
+  $('linknote').textContent = `🔗 링크로 연 결과 · ${got.day || '오늘'} 기준`;
+  $('linknote').hidden = false;
+  runAudit(got.text, got.situation, got.day);
+})();
 </script>
 </body>
 </html>

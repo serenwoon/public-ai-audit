@@ -50,7 +50,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel 규약
             self._json(200, kakao.simple_text("콜백 실측(지연 N)은 Vercel이 아니라 로컬 서버(spike/server.py)에서 합니다."))
             return
         result = engine.audit(utterance)
-        self._json(200, kakao.audit_outputs(result, self._base_url()))
+        self._json(200, kakao.audit_outputs(result, self._base_url(), text=utterance))
 
     def log_message(self, fmt, *args):
         return

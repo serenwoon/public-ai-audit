@@ -99,6 +99,7 @@ def audit(text: str, situation: str = "", today: date | None = None) -> dict:
     return {
         "engine": ENGINE,
         "checked_at": datetime.now(KST).isoformat(timespec="seconds"),
+        "basis_date": today.isoformat(),  # 규칙이 쓴 날짜 — 결과 링크가 같은 날 기준으로 다시 계산한다
         "situation": situation or "",
         "claims": claims,
         "questions": questions,

@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import re
 
+import share_link
+
 VERSION = "2.0"
 MAX_DELAY = 600  # 초. 실측용 상한
 
@@ -67,8 +69,12 @@ def _clip(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def audit_outputs(result: dict, base_url: str | None = None) -> dict:
-    """engine.audit() 결과를 스킬 응답(outputs 3개)으로 만든다."""
+def audit_outputs(result: dict, base_url: str | None = None, text: str | None = None) -> dict:
+    """engine.audit() 결과를 스킬 응답(outputs 3개)으로 만든다.
+
+    text(감리한 답변 원문)를 주면 「웹에서 자세히」가 첫 화면이 아니라 이 답변의 결과 링크를 연다.
+    링크가 상한을 넘으면 첫 화면으로 돌아가고 카드에 그 사실을 적는다.
+    """
     s = result.get("summary") or {}
     claims = result.get("claims") or []
     head = f"주장 {len(claims)}개 — ✅{s.get('확인됨', 0)} ❌{s.get('틀림', 0)} ⚠️{s.get('말하지 않은 조건', 0)} ❓{s.get('확인 불가', 0)}"
@@ -85,9 +91,15 @@ def audit_outputs(result: dict, base_url: str | None = None) -> dict:
     else:
         second = "되물을 것이 없어요."
 
-    card = {"title": "오늘 할 행동 하나", "description": _clip(result.get("action") or "", 200)}
+    description = result.get("action") or ""
     if base_url:
-        card["buttons"] = [{"action": "webLink", "label": "웹에서 자세히", "webLinkUrl": base_url.rstrip("/") + "/"}]
+        link = share_link.result_link(base_url, text, day=share_link.parse_day(result.get("basis_date"))) if text else None
+        if text and not link:
+            description += "\n(답변이 길어 링크에 담지 못했어요 — 웹에 붙여 넣어 주세요)"
+        card = {"title": "오늘 할 행동 하나", "description": _clip(description, 200),
+                "buttons": [{"action": "webLink", "label": "웹에서 자세히", "webLinkUrl": link or base_url.rstrip("/") + "/"}]}
+    else:
+        card = {"title": "오늘 할 행동 하나", "description": _clip(description, 200)}
 
     return {
         "version": VERSION,

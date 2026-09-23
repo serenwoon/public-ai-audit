@@ -1,5 +1,6 @@
 """순수 함수 시험. 소켓을 막고 돈다 — 이 시험이 네트워크를 쓰면 실패해야 한다."""
 import json
+import random
 import socket
 import sys
 import unittest
@@ -114,6 +115,29 @@ class TestAuditOutputs(_NoNetwork):
         t = r["template"]["outputs"][0]["simpleText"]["text"]
         self.assertIn("외 4개는 웹에서", t)
         self.assertLessEqual(len(t), 1000)
+
+
+class TestResultLinkButton(_NoNetwork):
+    """「웹에서 자세히」가 첫 화면이 아니라 이 답변의 감리 결과를 연다 (2026-09-23)."""
+
+    def _result(self):
+        return {"summary": {"확인됨": 0, "틀림": 0, "말하지 않은 조건": 1, "확인 불가": 0},
+                "claims": [{"mark": "⚠️", "type": "마감", "text": "이번 달 말까지 신청하세요.", "grade": "말하지 않은 조건"}],
+                "questions": ["q1"], "action": "공고 원문 열기", "basis_date": "2026-09-23"}
+
+    def test_button_opens_this_answers_result_on_the_same_day(self):
+        card = kakao.audit_outputs(self._result(), "https://x.vercel.app", text="이번 달 말까지 신청하세요.")["template"]["outputs"][2]["basicCard"]
+        url = card["buttons"][0]["webLinkUrl"]
+        self.assertTrue(url.startswith("https://x.vercel.app/#"))
+        self.assertIn("d=2026-09-23", url)
+        self.assertIn("a=", url)
+
+    def test_too_long_answer_falls_back_to_home_and_says_so(self):
+        rnd = random.Random(7)
+        noisy = "".join(chr(rnd.randint(0xAC00, 0xD7A3)) for _ in range(3000))
+        card = kakao.audit_outputs(self._result(), "https://x.vercel.app", text=noisy)["template"]["outputs"][2]["basicCard"]
+        self.assertEqual(card["buttons"][0]["webLinkUrl"], "https://x.vercel.app/")
+        self.assertIn("링크에 담지 못했어요", card["description"])
 
 
 class TestDecodeJson(_NoNetwork):

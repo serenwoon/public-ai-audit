@@ -1,4 +1,7 @@
-"""Vercel 함수 — POST /api/audit  {"text": "...", "situation": "..."} → 감리 JSON (스텁 엔진)."""
+"""Vercel 함수 — POST /api/audit  {"text", "situation"?, "today"?: "YYYY-MM-DD"} → 감리 JSON.
+
+today 는 결과 링크로 열었을 때 카카오에서 본 날과 같은 날 기준으로 다시 계산하려고 받는다. 없으면 오늘(한국 시간).
+"""
 import json
 import sys
 from http.server import BaseHTTPRequestHandler
@@ -7,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spike"))
 import engine  # noqa: E402
 import kakao  # noqa: E402
+import share_link  # noqa: E402
 
 MAX_TEXT = 8000
 
@@ -37,7 +41,13 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel 규약
         if len(text) > MAX_TEXT:
             self._json(413, {"error": f"text가 너무 깁니다 (최대 {MAX_TEXT}자)"})
             return
-        self._json(200, engine.audit(text, (body.get("situation") or "").strip()[:200]))
+        today = None
+        if body.get("today") is not None:
+            today = share_link.parse_day(body.get("today"))
+            if today is None:
+                self._json(400, {"error": "today 형식은 YYYY-MM-DD 입니다"})
+                return
+        self._json(200, engine.audit(text, (body.get("situation") or "").strip()[:200], today=today))
 
     def log_message(self, fmt, *args):
         return

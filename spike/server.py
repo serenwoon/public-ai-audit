@@ -24,11 +24,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engine  # noqa: E402
 import kakao  # noqa: E402
+import share_link  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 LOG_DIR = ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 INDEX = ROOT / "public" / "index.html"
+SHARE_JS = ROOT / "public" / "share.js"
 
 
 def _now() -> str:
@@ -90,6 +92,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
+        elif path == "/share.js":
+            self._send(200, SHARE_JS.read_bytes(), "application/javascript; charset=utf-8")
         elif path.startswith("/health"):
             self._json({"ok": True, "engine": engine.ENGINE, "ts": _now()})
         elif path.startswith("/audit"):
@@ -107,7 +111,13 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self._json({"error": "text가 비었습니다"}, 400)
                 return
-            self._json(engine.audit(text[:8000], (payload.get("situation") or "").strip()[:200]))
+            today = None
+            if payload.get("today") is not None:
+                today = share_link.parse_day(payload.get("today"))
+                if today is None:
+                    self._json({"error": "today 형식은 YYYY-MM-DD 입니다"}, 400)
+                    return
+            self._json(engine.audit(text[:8000], (payload.get("situation") or "").strip()[:200], today=today))
             return
 
         if not path.startswith("/skill"):
@@ -136,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         if not req["utterance"]:
             self._json(kakao.simple_text("AI가 준 답을 그대로 붙여 넣거나 이 채팅으로 전달해 주세요."))
             return
-        self._json(kakao.audit_outputs(engine.audit(req["utterance"]), self._base_url()))
+        self._json(kakao.audit_outputs(engine.audit(req["utterance"]), self._base_url(), text=req["utterance"]))
 
     def log_message(self, fmt, *args):  # 기본 access log는 조용히
         return

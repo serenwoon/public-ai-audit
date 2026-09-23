@@ -4,3 +4,5 @@ logs/
 .env
 .env.*
 .venv/
+data/welfare/_probe/
+scripts/

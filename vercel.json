@@ -2,16 +2,27 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "outputDirectory": "public",
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "functions": {
     "api/*.py": {
       "maxDuration": 60,
-      "excludeFiles": "{logs/**,tests/**,.git/**,**/__pycache__/**,**/*.log}"
+      "excludeFiles": "{logs/**,tests/**,.git/**,**/__pycache__/**,**/*.log,scripts/**,data/welfare/_probe/**}"
     }
   },
   "rewrites": [
-    { "source": "/skill",  "destination": "/api/skill" },
-    { "source": "/audit",  "destination": "/api/audit" },
-    { "source": "/health", "destination": "/api/health" }
+    {
+      "source": "/skill",
+      "destination": "/api/skill"
+    },
+    {
+      "source": "/audit",
+      "destination": "/api/audit"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
   ]
 }
